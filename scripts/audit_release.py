@@ -4,12 +4,12 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE_FILES={
- 'main.py','paths.py','desktop_pet.py','manager.py','importer.py','export_model.py','animation_sampling.py',
+ 'main.py','paths.py','desktop_pet.py','manager.py','importer.py','export_model.py','animation_sampling.py','click_through.py','bubble_menu.py','menu_assets.py',
  'app.svg','camera.json','README.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore',
  'requirements.txt','requirements-build.txt','requirements.lock',
- 'web/index.html','web/viewer.js','web/three.core.js','web/three.module.js',
+ 'web/index.html','web/viewer.js','web/ground-shadow.js','web/bubble-menu.js','web/bubble-menu.css','web/idle-actions.js','web/three.core.js','web/three.module.js',
  'vendor/__init__.py','vendor/pengpeng/__init__.py','vendor/pengpeng/unity.py','vendor/pengpeng/bundle.py','vendor/pengpeng/common.py','vendor/pengpeng/storage.py',
- 'scripts/build.py','scripts/audit_release.py','scripts/hooks/hook-PySide6.QtQml.py','tests/test_core.py','tests/test_ui.py','.github/workflows/build.yml'
+ 'scripts/build.py','scripts/audit_release.py','scripts/hooks/hook-PySide6.QtQml.py','tests/test_core.py','tests/test_ui.py','tests/test_click_through.py','tests/test_ground_shadow.py','tests/test_bubble_menu.py','.github/workflows/build.yml'
 }
 FORBIDDEN={'.unity3d','.fsb','.wav','.ogg','.mp3','.sqlite3','.ini','.lnk'}
 
@@ -23,9 +23,9 @@ def audit_files(files,base):
     names=[]
     for path in files:
         name=path.relative_to(base).as_posix();lower=name.lower()
-        if path.suffix.lower() in FORBIDDEN or Path(lower).name in ('pet-data.js','catalog.js','library.json','available.json','source.json','preferences.ini'):
+        if path.suffix.lower() in FORBIDDEN or Path(lower).name in ('pet-data.js','catalog.js','library.json','available.json','source.json','preferences.ini','card-name.ttf','menu-assets.js','menu-ui.json'):
             raise ValueError('Game asset or user data in release: '+name)
-        if any(part in ('pets','cache','audio','资料') for part in Path(lower).parts):raise ValueError('Local cache in release: '+name)
+        if any(part in ('pets','cache','audio','资料','menu-assets') for part in Path(lower).parts):raise ValueError('Local cache in release: '+name)
         if path.suffix in ('.js','.json'):
             content=path.read_text(encoding='utf-8')
             if 'window.PET_DATA=' in content or 'window.PET_SOUNDS=' in content:raise ValueError('Exported game data in release: '+name)

@@ -55,19 +55,39 @@
   },
   "pet_16_1": {
     "viewHeight": 3.6456,
-    "faceMode": "pupils"
+    "faceMode": "pupils",
+    "viewAngles": [
+      -0.159043,
+      -0.24652,
+      -0.733618
+    ]
   },
   "pet_16_2": {
     "viewHeight": 3.6456,
-    "faceMode": "pupils"
+    "faceMode": "pupils",
+    "viewAngles": [
+      -0.159043,
+      -0.24652,
+      -0.733618
+    ]
   },
   "pet_16_3": {
     "viewHeight": 3.9931,
-    "faceMode": "pupils"
+    "faceMode": "pupils",
+    "viewAngles": [
+      -0.159043,
+      -0.24652,
+      -0.733618
+    ]
   },
   "pet_16_4": {
     "viewHeight": 3.6456,
-    "faceMode": "pupils"
+    "faceMode": "pupils",
+    "viewAngles": [
+      -0.159043,
+      -0.24652,
+      -0.733618
+    ]
   },
   "pet_4_1": {
     "viewHeight": 2.6,

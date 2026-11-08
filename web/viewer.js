@@ -1,4 +1,7 @@
 import * as THREE from './three.module.js';
+import {createIdleActions} from './idle-actions.js';
+import {createBubbleMenu} from './bubble-menu.js';
+import {contactPlane,groundShadowMaterial,shortShadowDirection} from './ground-shadow.js';
 window.petErrors=[];
 function fail(e){window.petErrors.push(String(e));const el=document.querySelector('#error');el.style.display='block';el.textContent='加载失败：'+e;}
 window.addEventListener('error',e=>fail(e.message));
@@ -16,6 +19,25 @@ const faceBones=[boneIndex('eyeA_L_jnt'),boneIndex('eyeA_R_jnt'),firstBone(['bro
 const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setClearColor(0,0);
 renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
+// Keep the ground shadow outside WebGL so hit testing sees only the pet.
+const shadowCanvas=document.createElement('canvas');shadowCanvas.id='ground-shadow';
+shadowCanvas.setAttribute('aria-hidden','true');document.body.prepend(shadowCanvas);
+const shadowContext=shadowCanvas.getContext('2d');
+function drawGroundShadow(groundY){
+    const w=innerWidth,h=innerHeight;
+    if(shadowCanvas.width!==w||shadowCanvas.height!==h){shadowCanvas.width=w;shadowCanvas.height=h;}
+    shadowContext.clearRect(0,0,w,h);
+    if(groundY===undefined){
+        shadowContext.globalAlpha=.25;shadowContext.drawImage(renderer.domElement,0,0,w,h);shadowContext.globalAlpha=1;return;
+    }
+    // Floating pets retain their soft, detached footprint.
+    shadowContext.setTransform(.75,0,-.12,.18,w*.125+.12*groundY,.82*groundY);
+    shadowContext.drawImage(renderer.domElement,0,0,w,h);
+    shadowContext.setTransform(1,0,0,1,0,0);
+    shadowContext.globalCompositeOperation='source-in';
+    shadowContext.fillStyle='rgba(0,0,0,.25)';shadowContext.fillRect(0,0,w,h);
+    shadowContext.globalCompositeOperation='source-over';
+}
 const scene=new THREE.Scene(),stage=new THREE.Group();scene.add(stage);stage.scale.z=-1;
 const nodes=data.nodes.map((n,i)=>{const b=new THREE.Bone();b.name='bone_'+i;b.position.fromArray(n.position);b.quaternion.fromArray(n.quaternion);b.scale.fromArray(n.scale);return b;});
 data.nodes.forEach((n,i)=>{(n.parent<0?stage:nodes[n.parent]).add(nodes[i]);});
@@ -91,8 +113,11 @@ const right=across.clone();
 if(new THREE.Vector3().crossVectors(forehead,outward).dot(right)<0)right.negate();
 const up=new THREE.Vector3().crossVectors(outward,right).normalize();
 if(config.pet!=='ysera'){stage.updateMatrixWorld(true);skeleton.update();pet.computeBoundingBox();pet.boundingBox.getCenter(name==='Sequence_Flying_Idle'?flightTarget:idleTarget).applyMatrix4(pet.matrixWorld);}
+const [yaw,pitch,roll]=config.viewAngles||[-.32,0,0];
 return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right,up,outward))
-    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),-.32));
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),yaw))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),pitch))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),roll));
 }
 const flightView=actions.Sequence_Flying_Idle?calibrateView('Sequence_Flying_Idle'):null;
 defaultView.copy(calibrateView('Idle_Neutral'));
@@ -101,18 +126,54 @@ viewOrientation.copy(defaultView);updateView();
 function updateProjection(){const w=innerWidth,h=innerHeight,height=(config.viewHeight||2.1)*h/420/zoom;camera.left=-height*w/h/2;camera.right=-camera.left;camera.top=height/2;camera.bottom=-height/2;camera.updateProjectionMatrix();}
 function resize(){renderer.setSize(innerWidth,innerHeight);updateProjection();}
 window.addEventListener('resize',resize);resize();
+stage.updateMatrixWorld(true);skeleton.update();
+let groundLevel=Infinity;const groundVertex=new THREE.Vector3();
+for(let i=0;i<geo.attributes.position.count;i++)groundLevel=Math.min(groundLevel,pet.getVertexPosition(i,groundVertex).applyMatrix4(pet.matrixWorld).project(camera).y/zoom);
+const ground=[9,16].includes(config.petId)?null:contactPlane(pet,data,[7,15,6].includes(config.petId));
+let groundMaterial=null;
+if(ground){
+    pet.computeBoundingBox();const center=pet.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(pet.matrixWorld);
+    const contact=ground.contacts.length?ground.contacts.reduce((sum,p)=>sum.add(p),new THREE.Vector3()).multiplyScalar(1/ground.contacts.length):ground.plane.projectPoint(center,new THREE.Vector3());
+    // Keep the footprint short and behind the feet in the default view.
+    const length=pet.boundingBox.getSize(new THREE.Vector3()).length()*.075;
+    const direction=shortShadowDirection(ground.plane,center,contact,camera.quaternion,length);
+    groundMaterial=groundShadowMaterial(ground.plane,ground.plane.normal.dot(direction)>.001?direction:ground.plane.normal);
+}
+if(ground)shadowCanvas.style.filter='blur(6px)';
+let renderFrames=0;
+function renderFrame(){
+    if(groundMaterial){
+        scene.overrideMaterial=groundMaterial;
+        try{renderer.render(scene,camera);drawGroundShadow();}finally{scene.overrideMaterial=null;}
+    }
+    renderer.render(scene,camera);
+    if(!groundMaterial)drawGroundShadow((1-groundLevel*zoom)*innerHeight/2+6*zoom);
+    renderFrames++;
+}
+
 window.petCommand=command;window.petMute=value=>{muted=value;if(muted&&voice)voice.pause();};
 window.petZoom=delta=>{if(viewLocked)return;zoom=THREE.MathUtils.clamp(zoom+delta,.65,1.5);sessionStorage.setItem('petZoom',String(zoom));updateProjection();};
 window.petSetViewLocked=value=>{viewLocked=Boolean(value);};
 window.petResetView=()=>{if(viewLocked)return;viewOrientation.copy(defaultView);zoom=1;sessionStorage.setItem('petZoom',String(zoom));updateView();updateProjection();};
-window.petCheck=()=>{stage.updateMatrixWorld(true);skeleton.update();pet.computeBoundingBox();const box=pet.boundingBox,screenBox=new THREE.Box3(),v=new THREE.Vector3();for(let i=0;i<geo.attributes.position.count;i++)screenBox.expandByPoint(pet.getVertexPosition(i,v).applyMatrix4(pet.matrixWorld).project(camera));return {ready:true,variant:config.id,state:window.petState,bones:skeleton.bones.length,clips:Object.keys(actions),view:{orientation:viewOrientation.toArray(),zoom,locked:viewLocked},viewport:[innerWidth,innerHeight],screenBounds:{min:screenBox.min.toArray(),max:screenBox.max.toArray()},face:{left:point(faceBones[0]).project(camera).toArray(),right:point(faceBones[1]).project(camera).toArray(),forehead:point(faceBones[2]).add(point(faceBones[3])).multiplyScalar(.5).project(camera).toArray(),nose:point(faceBones[4]).add(point(faceBones[5])).multiplyScalar(.5).project(camera).toArray()},renderFrames:renderer.info.render.frame,bounds:{min:box.min.toArray(),max:box.max.toArray()},errors:window.petErrors};};
-window.petSample=(name,time)=>{mixer.stopAllAction();current=null;play(name,true);current.stopFading().setEffectiveWeight(1);current.time=time;mixer.update(0);renderer.render(scene,camera);return window.petCheck();};
-window.petInspect=()=>{renderer.render(scene,camera);return renderer.domElement.toDataURL();};
+window.petCheck=()=>{stage.updateMatrixWorld(true);skeleton.update();pet.computeBoundingBox();const box=pet.boundingBox,screenBox=new THREE.Box3(),v=new THREE.Vector3();for(let i=0;i<geo.attributes.position.count;i++)screenBox.expandByPoint(pet.getVertexPosition(i,v).applyMatrix4(pet.matrixWorld).project(camera));return {ready:true,variant:config.id,state:window.petState,bones:skeleton.bones.length,clips:Object.keys(actions),view:{orientation:viewOrientation.toArray(),zoom,locked:viewLocked},viewport:[innerWidth,innerHeight],screenBounds:{min:screenBox.min.toArray(),max:screenBox.max.toArray()},face:{left:point(faceBones[0]).project(camera).toArray(),right:point(faceBones[1]).project(camera).toArray(),forehead:point(faceBones[2]).add(point(faceBones[3])).multiplyScalar(.5).project(camera).toArray(),nose:point(faceBones[4]).add(point(faceBones[5])).multiplyScalar(.5).project(camera).toArray()},renderFrames,ground:ground?{normal:ground.plane.normal.toArray(),constant:ground.plane.constant,contactSamples:ground.contacts.length}:null,bounds:{min:box.min.toArray(),max:box.max.toArray()},errors:window.petErrors};};
+window.petSample=(name,time)=>{mixer.stopAllAction();current=null;play(name,true);current.stopFading().setEffectiveWeight(1);current.time=time;mixer.update(0);renderFrame();return window.petCheck();};
+window.petInspect=()=>{renderFrame();return renderer.domElement.toDataURL();};
 window.petStep=dt=>{renderer.setAnimationLoop(null);mixer.update(dt);return {state:window.petState,root:nodes[boneIndex('rootA_M_jnt')].quaternion.toArray(),weights:Object.fromEntries(Object.entries(actions).map(([name,action])=>[name,action.getEffectiveWeight()]))};};
+const bubbleMenu=await createBubbleMenu({assets:window.PET_MENU_ASSETS||{},state:()=>window.petState,onAction:id=>native?.menuAction(id)});
+window.petShowMenu=bubbleMenu.show;window.petHideMenu=bubbleMenu.hide;window.petMenuHit=bubbleMenu.contains;
 // Wait for the first painted frame before the native window becomes visible.
-if(window.qt&&window.QWebChannel)new QWebChannel(qt.webChannelTransport,c=>{native=c.objects.desktop;requestAnimationFrame(()=>{renderer.render(scene,camera);requestAnimationFrame(()=>native.ready());});});
+if(window.qt&&window.QWebChannel)new QWebChannel(qt.webChannelTransport,c=>{native=c.objects.desktop;requestAnimationFrame(()=>{renderFrame();requestAnimationFrame(()=>native.ready());});});
 document.addEventListener('contextmenu',e=>e.preventDefault());
 const ray=new THREE.Raycaster();
+const hitPixel=new Uint8Array(4);
+window.petHitTest=(x,y,width,height)=>{
+    if(x<0||y<0||x>=width||y>=height)return false;
+    if(window.petMenuHit?.(x/width*innerWidth,y/height*innerHeight))return true;
+    const gl=renderer.getContext(),canvas=renderer.domElement;
+    if(gl.isContextLost())return false;
+    gl.readPixels(Math.floor(x/width*canvas.width),canvas.height-1-Math.floor(y/height*canvas.height),1,1,gl.RGBA,gl.UNSIGNED_BYTE,hitPixel);
+    return hitPixel[3]>8;
+};
 function hit(e){pet.computeBoundingSphere();ray.setFromCamera(new THREE.Vector2(e.clientX/innerWidth*2-1,1-e.clientY/innerHeight*2),camera);return ray.intersectObject(pet).length>0;}
 renderer.domElement.addEventListener('pointerdown',e=>{
     if(e.button!==2&&(e.button!==0||!hit(e)))return;
@@ -144,6 +205,7 @@ renderer.domElement.addEventListener('pointercancel',()=>{drag=null;});
 renderer.domElement.addEventListener('lostpointercapture',()=>{drag=null;});
 window.addEventListener('wheel',e=>{e.preventDefault();window.petZoom(e.deltaY>0?-.05:.05);},{passive:false});
 window.addEventListener('keydown',e=>{if(e.key==='Escape')native?.quit();if(e.key===' ')command('Emote_Greetings');});
-let last=performance.now(),nextFrame=last,elapsed=0;
-renderer.setAnimationLoop(now=>{if(now+.5<nextFrame)return;const dt=Math.min((now-last)/1000,.1);last=now;nextFrame+=1000/60;if(nextFrame<now)nextFrame=now+1000/60;mixer.update(dt);elapsed+=dt;if(elapsed>24&&window.petState==='Idle_Neutral'){elapsed=0;command(Math.random()<.5?'Emote_Wow':'Emote_Greetings');}renderer.render(scene,camera);});
+const idleActions=createIdleActions(actions,command);
+let last=performance.now(),nextFrame=last;
+renderer.setAnimationLoop(now=>{if(now+.5<nextFrame)return;const dt=Math.min((now-last)/1000,.1);last=now;nextFrame+=1000/60;if(nextFrame<now)nextFrame=now+1000/60;mixer.update(dt);idleActions(dt,window.petState);renderFrame();});
 window.petReady=true;

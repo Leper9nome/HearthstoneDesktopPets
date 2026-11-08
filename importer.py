@@ -35,9 +35,15 @@ def scan(game,data):
     if data==game or game in data.parents:raise ValueError('本地缓存必须放在游戏安装目录之外。')
     files=list(base.glob('initial_base_pet_*'))+list(base.glob('asset_manifest*.unity3d'))+[base/'dbf.unity3d']
     signature=stamp(files);old=read_json(cache/'available.json',{})
+    reader=reader_for(game,cache)
+    from menu_assets import import_menu_assets
+    try:menu_assets=import_menu_assets(reader,cache)
+    except (OSError,ValueError,KeyError) as error:
+        progress('气泡素材暂不可用，使用简洁气泡：'+str(error));menu_assets={}
     if old.get('signature')==signature:
+        old['menuAssets']=menu_assets;write_json(cache/'available.json',old)
         write_json(data/'library.json',old);progress('本地资源目录已是最新。');return
-    progress('读取本地宠物名称和外观清单…');reader=reader_for(game,cache)
+    progress('读取本地宠物名称和外观清单…')
     tables={Path(k).stem:o.read_typetree()['Records'] for k,o in reader.load('dbf.unity3d').container.items() if Path(k).stem in ('PET','PET_VARIANT')}
     if not tables.get('PET') or not tables.get('PET_VARIANT'):raise ValueError('当前客户端缺少可识别的宠物数据表。')
     installed={int(m[1]) for p in files if (m:=re.match(r'initial_base_pet_(\d+)_global-',p.name))}
@@ -56,7 +62,7 @@ def scan(game,data):
     if not entries:raise ValueError('本地没有宠物资源包。请先通过战网完成炉石资源下载，再重新扫描。')
     order=[7,9,3,15,16,4,6,8,10,12]
     entries.sort(key=lambda c:(order.index(c['petId']) if c['petId'] in order else 100+c['petId'],c['skin']))
-    library={'game':str(game),'cache':str(cache),'signature':signature,'entries':entries}
+    library={'game':str(game),'cache':str(cache),'signature':signature,'entries':entries,'menuAssets':menu_assets}
     write_json(cache/'available.json',library);write_json(data/'library.json',library)
     progress(f'发现 {len(installed)} 只宠物、{len(entries)} 款外观。')
 

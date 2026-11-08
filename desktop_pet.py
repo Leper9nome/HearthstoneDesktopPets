@@ -2,13 +2,15 @@
 import json, sys, ctypes, os
 from pathlib import Path
 from PySide6.QtCore import Qt, QUrl, QObject, Slot, QTimer
-from PySide6.QtGui import QColor, QCursor
-from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
 
 from paths import APP
+from click_through import ClickThrough
+from bubble_menu import menu_items,perform_menu_action
 
 class Page(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, line, source):
@@ -19,11 +21,13 @@ class Desktop(QObject):
     def __init__(self,view):
         super().__init__(view)
         self.view=view
+        self.click_through=ClickThrough(view)
         self.muted=True
         self.view_locked=False
         self.variant={'clips':[],'pet':''}
         self.ready_callback=None
         self.open_panel=None
+        self.random_pet=None
         self.quit_callback=None
 
     @Slot()
@@ -43,24 +47,12 @@ class Desktop(QObject):
 
     @Slot()
     def menu(self):
-        menu=QMenu(self.view)
-        clips=set(self.variant['clips'])
-        if {'Sequence_Pet_In','Sequence_Pet_Loop','Sequence_Pet_Out'}<=clips:
-            menu.addAction('摸摸她' if self.variant['pet']=='ysera' else '摸摸它',lambda:self.view.page().runJavaScript('petCommand("pet")'))
-        for label,command in [('打个招呼','Emote_Greetings'),('开心一下','Reaction_Happy_Big'),('惊叹','Emote_Wow'),('威吓一下','Emote_Threaten'),('飞起来','Sequence_Flying_Idle'),('回到待机','Idle_Neutral')]:
-            if command in clips:menu.addAction(label,lambda c=command:self.view.page().runJavaScript('petCommand('+json.dumps(c)+')'))
-        menu.addSeparator()
-        lock=menu.addAction('锁定视角')
-        lock.setCheckable(True)
-        lock.setChecked(self.view_locked)
-        lock.toggled.connect(self.set_view_locked)
-        reset=menu.addAction('恢复默认视角',lambda:self.view.page().runJavaScript('petResetView()'))
-        reset.setEnabled(not self.view_locked)
-        menu.addSeparator()
-        if self.variant.get('sounds'):menu.addAction('开启声音' if self.muted else '关闭声音',self.toggle_sound)
-        if self.open_panel:menu.addAction('打开管理面板',self.open_panel)
-        menu.addAction('退出',self.quit)
-        menu.exec(QCursor.pos())
+        self.view.activateWindow();self.view.setFocus()
+        self.view.page().runJavaScript('petShowMenu('+json.dumps(menu_items(self),ensure_ascii=False)+')')
+
+    @Slot(str)
+    def menuAction(self,key):
+        perform_menu_action(self,key)
 
     def toggle_sound(self):
         self.muted=not self.muted

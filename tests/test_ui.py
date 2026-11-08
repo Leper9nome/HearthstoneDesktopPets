@@ -27,14 +27,14 @@ def loaded(raw):
         if phase==0:
             phase=1;view.page().runJavaScript('petZoom(.35)',lambda _:manager.select('nightmare'))
         elif phase==1:
-            assert abs(r['view']['zoom']-1.35)<1e-8;phase=2;manager.select('deathling')
+            assert abs(r['view']['zoom']-1.35)<1e-8;phase=2;bridge.menuAction('random')
         else:
             assert abs(r['view']['zoom']-1.35)<1e-8
             manager.panel.grab().save(str(data/'panel-test.png'))
             manager.panel.close();assert not manager.panel.isVisible() and manager.tray.isVisible() and view.isVisible()
             manager.open_panel();assert manager.panel.isVisible()
-            assert manager.settings.value('selected')=='deathling'
-            print('PASS: local scan/import, assets, audio, preview, pet/skin switching, zoom and tray',flush=True)
+            assert manager.selected['petId']!=7 and manager.settings.value('selected')==r['variant']
+            print('PASS: local import, random different pet/skin via menu, preserved zoom and tray',flush=True)
             manager.quit()
     except Exception:traceback.print_exc();app.exit(1)
 

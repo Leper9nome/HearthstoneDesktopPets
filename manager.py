@@ -1,5 +1,6 @@
 """Selection panel, tray and background local-asset import."""
-import json,sys,base64,io
+from bubble_menu import random_variant
+import json,sys,base64,io,hashlib
 from pathlib import Path
 from PySide6.QtCore import Qt,QUrl,QUrlQuery,QTimer,QSettings,QSize,QProcess
 from PySide6.QtGui import QIcon,QPixmap
@@ -16,7 +17,7 @@ class PetManager:
     def __init__(self,view,desktop,data):
         self.view=view;self.desktop=desktop;self.data=data
         self.settings=QSettings(str(data/'preferences.ini'),QSettings.IniFormat)
-        self.catalog=[];self.selected=None;self.loaded=None;self.loaded_model=None
+        self.catalog=[];self.selected=None;self.loaded=None;self.loaded_model=None;self.loaded_menu_assets=None
         self.library={};self.queue=[];self.process=None;self.busy=None;self.failed=set();self.quitting=False
         self.panel=Panel();self.panel.setWindowTitle('炉石桌面伙伴');self.panel.setWindowFlags(Qt.Window|Qt.WindowMinimizeButtonHint|Qt.WindowCloseButtonHint);self.panel.setFixedSize(420,570)
         icon=QIcon(str(APP/'app.svg'));self.panel.setWindowIcon(icon);QApplication.instance().setWindowIcon(icon);QApplication.instance().setQuitOnLastWindowClosed(False)
@@ -52,7 +53,7 @@ class PetManager:
         layout.addStretch();note=QLabel('关闭面板后继续陪伴 · 右击托盘可打开或退出');note.setObjectName('muted');layout.addWidget(note)
         self.tray=QSystemTrayIcon(icon,self.panel);self.tray.setToolTip('炉石桌面伙伴')
         self.tray_menu=QMenu();self.tray_menu.addAction('打开面板',self.open_panel);self.tray_menu.addSeparator();self.tray_menu.addAction('退出',self.quit);self.tray.setContextMenu(self.tray_menu);self.tray.activated.connect(self.tray_activated)
-        desktop.open_panel=self.open_panel;desktop.ready_callback=self.ready;desktop.quit_callback=self.quit
+        desktop.random_pet=self.random_pet;desktop.open_panel=self.open_panel;desktop.ready_callback=self.ready;desktop.quit_callback=self.quit
         self.timeout=QTimer(self.panel);self.timeout.setSingleShot(True);self.timeout.timeout.connect(lambda:self.status.setText('画面加载未完成，请重新选择宠物或检查运行日志。'))
         self.job_timer=QTimer(self.panel);self.job_timer.setInterval(250);self.job_timer.timeout.connect(self.job_progress)
         self.reload_library();self.refresh_panel()
@@ -67,9 +68,17 @@ class PetManager:
             for entry in record.get('entries',[]):
                 if Path(entry['localModel']).is_file():imported[entry['id']]=entry
         self.catalog=[imported.get(c['id'],c) for c in self.library.get('entries',[])]
+        # Application camera fixes also apply to previously imported models.
+        camera=read_json(APP/'camera.json',{})
+        for entry in self.catalog:
+            preset=camera.get(entry['id'],{})
+            if preset.get('viewAngles') and entry.get('preview'):
+                stamp=hashlib.sha256(json.dumps(preset,sort_keys=True).encode()).hexdigest()[:12]
+                entry['preview']=str(Path(entry['preview']).with_name('preview-'+stamp+'.png'))
+            entry.update(preset)
         key=self.selected['id'] if self.selected else self.settings.value('selected','ysera')
         self.selected=next((c for c in self.catalog if c['id']==key),self.catalog[0] if self.catalog else None)
-        (self.data/'catalog.js').write_text('window.PET_CATALOG='+json.dumps(self.catalog,ensure_ascii=False)+';',encoding='utf-8')
+        (self.data/'catalog.js').write_text('window.PET_CATALOG='+json.dumps(self.catalog,ensure_ascii=False)+';window.PET_MENU_ASSETS='+json.dumps(self.library.get('menuAssets',{}))+';',encoding='utf-8')
 
     def refresh_panel(self):
         self.pets.blockSignals(True);self.pets.clear()
@@ -116,7 +125,9 @@ class PetManager:
                 if entry['petId'] not in self.queue and self.busy!=('import',entry['petId']):self.queue.insert(0,entry['petId'])
                 self.status.setText('正在准备本地素材…');self.pump()
             return
-        if self.loaded==key and self.loaded_model==entry['model']:return
+        assets=self.library.get('menuAssets',{})
+        if self.loaded==key and self.loaded_model==entry['model'] and self.loaded_menu_assets==assets:return
+        self.loaded_menu_assets=dict(assets)
         self.desktop.variant=entry;self.desktop.view_locked=False;self.view.setWindowTitle(entry['name']+' · 桌面伙伴')
         self.view.setWindowOpacity(0);self.view.show()
         url=QUrl.fromLocalFile(str(APP/'web/index.html'));query=QUrlQuery();query.addQueryItem('pet',key);query.addQueryItem('catalog',QUrl.fromLocalFile(str(self.data/'catalog.js')).toString());url.setQuery(query)
@@ -182,6 +193,10 @@ class PetManager:
         self.reload_library();self.refresh_panel()
         if self.selected:self.select(self.selected['id'],retry=False)
         self.pump()
+
+    def random_pet(self):
+        entry=random_variant(self.catalog,self.selected)
+        if entry:self.select(entry['id'])
 
     def open_panel(self):self.panel.showNormal();self.panel.raise_();self.panel.activateWindow()
     def tray_activated(self,reason):
