@@ -1,0 +1,84 @@
+# 炉石桌面伙伴 · Hearthstone Desktop Pets
+
+将本机炉石客户端中的宠物显示为透明桌面伙伴。提供宠物与皮肤切换、抚摸、动作菜单、自由旋转、滚轮缩放和托盘管理。
+
+**源码与便携发行包均不包含游戏模型、贴图、声音、游戏图标或宠物截图。** 素材直接从用户选择的本地客户端读取，导出缓存仅留在用户电脑上。应用没有游戏素材下载、上传或遥测功能。
+
+## 普通用户
+
+1. 在 Releases 下载 `HearthstoneDesktopPets-windows-x64.zip`，完整解压到一个文件夹。
+2. 运行 `HearthstoneDesktopPets.exe`。
+3. 首次打开点击“选择炉石目录”，选择包含 `Hearthstone.exe` 和 `Data` 的安装目录。
+4. 选择宠物，程序会在后台导入该宠物的皮肤；也可点击“导入全部宠物”。
+5. 导入后无需启动游戏，即可离线播放。缺失资源时，请通过战网完成游戏资源下载后重新扫描。
+
+依赖：Windows 64 位系统、本机已下载的炉石资源、可用的显卡驱动，以及足够的本地缓存空间。程序自带 Python、Qt 与声音解码器，无需另外安装 Python、Anaconda、砰砰解析台或 Unity。首版面向 Windows 10/11；具体测试范围见下方。
+
+缓存、设置和日志默认位于 `%LOCALAPPDATA%\HearthstoneDesktopPets`，与程序文件分开。关闭程序后可删除该目录以清除导入素材及设置。`runtime.log` 记录界面运行错误，`import.log` 记录最近一次本地导入。提交问题前请检查日志中的个人路径。
+
+本次完整导入 40 款外观的缓存约为 1 GB，建议至少预留 2 GB 可用空间。首次导入需要处理模型和动画，请等待面板提示完成。导入使用独立进程，关闭面板后仍可继续；从托盘退出会停止导入。完成的缓存采用独立版本目录，中断不会覆盖此前可用版本。尚未完成的文件可能留在缓存中，可在关闭程序后清理整个缓存目录。
+
+## 操作
+
+- 左键单击宠物：抚摸；左键拖动：移动窗口。
+- 右键短按：动作、声音和视角菜单。动作按宠物实际可用资源显示。
+- 右键拖动：自由旋转；Shift + 右键左右拖动：绕视线转正。
+- 滚轮：缩放。切换宠物或皮肤保留倍率；恢复默认视角会恢复默认倍率。
+- 锁定视角：停止旋转和缩放，仍可移动宠物和播放动作。
+- 关闭面板：隐藏到托盘，宠物继续运行；托盘菜单可打开面板或退出。
+- 声音默认关闭，可在宠物右键菜单开启。
+
+切换时会暂时隐去宠物，首帧绘制后重新显示，避免加载空白窗口闪烁。动画按 60fps 采样导出，实际播放速度取决于电脑和显卡驱动。
+
+## 本地资源与兼容性
+
+已针对炉石客户端 `37.0.3.59182`、Unity `6000.3.11f1` 的本地资源验证 10 只宠物、40 款外观。名称和皮肤列表运行时读取本地 PET 数据表。当前代码含已验证的视角参数与少量皮肤编号对应规则，不包含游戏模型数据。
+
+重启时会检查所选安装目录。程序根据清单、数据表、相关资源包和依赖文件的时间与大小检测更新，变更后重建对应宠物缓存。客户端格式发生变化时可能需要更新解析代码。游戏目录暂时不可用时，已经导入的缓存仍可播放。
+
+身体、眼睛、透明材质和机械屏幕采用简化表现；完整粒子、玩具、喂食及视线跟随尚未移植。克苏恩对战待机动作会收拢头顶的大眼。
+
+## 从源码运行
+
+使用官方 CPython 3.13.x 64 位。在项目目录执行：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.lock
+.venv\Scripts\python scripts/build.py --prepare-only
+.venv\Scripts\python main.py
+```
+
+准备步骤下载固定版本的开源声音解码器并验证 SHA-256，仅用于本地声音转换；该步骤不下载游戏素材。下载内容进入已忽略的 `decoder/`、`build/`。
+
+可用 `--data-dir <程序目录之外的路径>` 指定测试或便携数据目录。源代码运行也必须将素材写在项目目录之外。
+
+## 构建便携版
+
+```powershell
+.venv\Scripts\python tests/test_core.py
+.venv\Scripts\python scripts/build.py
+```
+
+构建生成文件夹版 EXE、便携 ZIP、纯源码 ZIP、校验文件和素材排除报告。打包采用 PyInstaller onedir，依赖 DLL 保持独立，便于检查与替换。Windows GitHub Actions 可手动触发同样的构建，不需要游戏客户端或私有素材。
+
+UnityPy 的导出模块在构建期间临时改为惰性加载，构建后还原原文件；便携包排除其 FMOD 导出器与 FMOD DLL，声音交给 vgmstream。补丁逻辑完整保留在构建脚本中。
+
+## 验证
+
+```powershell
+python tests/test_core.py
+python tests/test_ui.py --data-dir C:\PetTestData
+python tests/test_ui.py --data-dir C:\PetGameTestData --game "D:\Hearthstone"
+python scripts/audit_release.py
+```
+
+纯代码测试使用人工数据，不需要或包含游戏资源。可选界面测试验证空白首启、后台本地导入、宠物/皮肤切换、缩放保留与托盘行为；输出放在指定的数据目录。游戏测试请使用独立的空目录。
+
+首版在开发电脑的独立 CPython 环境构建，并在移除 Python/Conda 环境变量和搜索路径的条件下验证 EXE 的空白首启、本地扫描、模型与声音导入及实际渲染。未完成 Windows 10/11 各硬件组合的测试，程序也尚未做发行者数字签名。
+
+## 许可证与来源
+
+自有代码使用 MIT，游戏素材不在此许可内。本项目为个人非官方工具，与暴雪娱乐无隶属或背书关系。用户应在本地使用自己的游戏安装资源。
+
+资源读取复用 [砰砰解析台](https://github.com/AsaMisogi/Heartstone-Tool-Resource-Lab) 的相关代码并保留 MIT 声明。Python、Qt、Three.js、UnityPy、vgmstream 等依赖分别遵循各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
