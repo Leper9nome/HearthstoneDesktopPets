@@ -51,8 +51,12 @@ class Desktop(QObject):
         self.view.page().runJavaScript('petShowMenu('+json.dumps(menu_items(self),ensure_ascii=False)+')')
 
     @Slot(str)
+    def cameraAction(self,value):
+        if hasattr(self,'camera_settings'):self.camera_settings.action(value)
+
+    @Slot(str)
     def menuAction(self,key):
-        perform_menu_action(self,key)
+        if not getattr(getattr(self,'camera_settings',None),'editing',False):perform_menu_action(self,key)
 
     def toggle_sound(self):
         self.muted=not self.muted

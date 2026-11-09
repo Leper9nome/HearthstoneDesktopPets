@@ -46,6 +46,18 @@ def export_model(reader,inventory,candidates,root,pid,skin):
             if entry['m_Texture']['m_PathID']:
                 texture=ptr(obj,entry['m_Texture']).read();filename=safe_name(texture.m_Name)+'.png';texture.image.save(out/filename);textures[key]=filename
         materials.append({'name':t['m_Name'],'shader':tree(ptr(obj,t['m_Shader'])).get('m_ParsedForm',{}).get('m_Name',''),'textures':textures,'floats':dict(props['m_Floats']),'colors':dict(props['m_Colors'])})
+    if any(m['shader']=='Hero/Pet/PetFlipBook' for m in materials):
+        root_go=ptr(tr,tree(tr)['m_GameObject'])
+        for component in tree(root_go)['m_Component']:
+            obj=ptr(root_go,component['component'])
+            if obj.type.name!='MonoBehaviour':continue
+            t=tree(obj)
+            if tree(ptr(obj,t['m_Script']))['m_ClassName']!='PetFlipBookController':continue
+            controls={key:ids[identity(ptr(obj,t[field]))] for key,field in [('EyeLeft','m_eyeLeft'),('EyeRight','m_eyeRight'),('Mouth','m_mouth')]}
+            for material in materials:
+                if material['shader']=='Hero/Pet/PetFlipBook' and t['m_materialName'].lower() in material['name'].lower():
+                    material['screenControls']=controls
+        assert all(m.get('screenControls') for m in materials if m['shader']=='Hero/Pet/PetFlipBook'),'Missing local screen controller'
     clips=[];sources=[]
     for row in inventory:
         if not row['bundle'].startswith(f'initial_base_pet_{pid}_global-'):continue
@@ -60,6 +72,9 @@ def export_model(reader,inventory,candidates,root,pid,skin):
             clips.append(clip);sources.append({'bundle':row['bundle'],'path_id':entry['id'],'name':raw['m_Name']})
     assert {'Idle_Neutral','Sequence_Pet_In','Sequence_Pet_Loop','Sequence_Pet_Out'}<={c['name'] for c in clips},(pid,skin,[c['name'] for c in clips])
     model={'nodes':nodes,'bones':bones,'inverseBindMatrices':matrices,'positions':mh.m_Vertices,'normals':mh.m_Normals,'uv':mh.m_UV0,'indices':mh.m_IndexBuffer,'skinIndices':mh.m_BoneIndices,'skinWeights':mh.m_BoneWeights,'groups':[{'start':s.firstByte//(2 if mh.m_Use16BitIndices else 4),'count':s.indexCount,'material':i} for i,s in enumerate(md.m_SubMeshes)],'materials':materials,'clips':clips}
+    if any(m['shader']=='Hero/Pet/PetFlipBook' for m in materials):
+        assert len(mh.m_Colors)==len(mh.m_Vertices),'Screen mesh is missing eye/mouth vertex masks'
+        model['vertexColors']=[[v/255 for v in color[:3]] for color in mh.m_Colors]
     (out/'pet-data.js').write_text('window.PET_DATA='+json.dumps(model,separators=(',',':'))+';',encoding='utf-8')
     (out/'source.json').write_text(json.dumps({'model':rec,'animationSources':sources,'omittedBindings':{c['name']:c['omittedBindings'] for c in clips if c['omittedBindings']}},ensure_ascii=False,indent=2),encoding='utf-8')
     return model

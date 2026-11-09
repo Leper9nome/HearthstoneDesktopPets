@@ -1,10 +1,11 @@
 """Selection panel, tray and background local-asset import."""
+from camera_settings import CameraSettings
 from bubble_menu import random_variant
 import json,sys,base64,io,hashlib
 from pathlib import Path
 from PySide6.QtCore import Qt,QUrl,QUrlQuery,QTimer,QSettings,QSize,QProcess
 from PySide6.QtGui import QIcon,QPixmap
-from PySide6.QtWidgets import QApplication,QWidget,QLabel,QPushButton,QComboBox,QVBoxLayout,QFrame,QSystemTrayIcon,QMenu,QFileDialog
+from PySide6.QtWidgets import QApplication,QWidget,QLabel,QPushButton,QComboBox,QVBoxLayout,QHBoxLayout,QFrame,QSystemTrayIcon,QMenu,QFileDialog
 from paths import APP,read_json
 
 class Panel(QWidget):
@@ -38,7 +39,11 @@ class PetManager:
         QComboBox QAbstractItemView { background:#222d3a; selection-background-color:#376558; padding:6px; }
         ''')
         layout=QVBoxLayout(self.panel);layout.setContentsMargins(22,18,22,16);layout.setSpacing(9)
-        title=QLabel('炉石桌面伙伴');title.setObjectName('title');layout.addWidget(title)
+        title=QLabel('炉石桌面伙伴');title.setObjectName('title')
+        heading=QHBoxLayout();heading.addWidget(title);heading.addStretch()
+        self.camera=CameraSettings(self)
+        self.view_settings=QPushButton();self.view_settings.setIcon(QIcon(str(APP/'camera.svg')));self.view_settings.setIconSize(QSize(20,20));self.view_settings.setFixedSize(28,28);self.view_settings.setStyleSheet('padding:3px; border-radius:6px;');self.view_settings.setAccessibleName('视角设置');self.view_settings.setToolTip('设置当前宠物的默认视角和缩放');self.view_settings.clicked.connect(self.camera.begin)
+        heading.addWidget(self.view_settings);layout.addLayout(heading)
         self.subtitle=QLabel('首次使用，请选择本机炉石安装目录');self.subtitle.setObjectName('muted');layout.addWidget(self.subtitle)
         self.directory=QPushButton('选择炉石目录');self.directory.clicked.connect(self.choose_directory);layout.addWidget(self.directory)
         self.pets=QComboBox();self.pets.setAccessibleName('选择宠物');self.pets.setIconSize(QSize(28,28));self.pets.setMaxVisibleItems(10)
@@ -100,6 +105,8 @@ class PetManager:
             self.subtitle.setText(f'{count} 位伙伴 · {len(self.catalog)} 款外观 · 已导入 {ready} 款')
             self.directory.setText('重新选择 / 扫描炉石目录');self.directory.setToolTip(self.library.get('game',''))
 
+        self.pets.setEnabled(bool(self.catalog) and not self.camera.editing);self.skins.setEnabled(self.skins.count()>1 and not self.camera.editing)
+
     def choose_directory(self):
         path=QFileDialog.getExistingDirectory(self.panel,'选择炉石安装目录',self.library.get('game',''))
         if path:self.start_job('scan',game=path)
@@ -116,6 +123,7 @@ class PetManager:
         if key:self.select(key)
 
     def select(self,key,retry=True):
+        if self.camera.editing:return
         entry=next((c for c in self.catalog if c['id']==key),None)
         if entry is None:raise ValueError('未知的宠物或皮肤')
         self.selected=entry;self.refresh_panel()
@@ -131,7 +139,7 @@ class PetManager:
         self.desktop.variant=entry;self.desktop.view_locked=False;self.view.setWindowTitle(entry['name']+' · 桌面伙伴')
         self.view.setWindowOpacity(0);self.view.show()
         url=QUrl.fromLocalFile(str(APP/'web/index.html'));query=QUrlQuery();query.addQueryItem('pet',key);query.addQueryItem('catalog',QUrl.fromLocalFile(str(self.data/'catalog.js')).toString());url.setQuery(query)
-        self.status.setText('正在唤醒 '+entry['name']+'…');self.view.load(url);self.timeout.start(15000)
+        self.status.setText('正在唤醒 '+entry['name']+'…');self.camera.prepare();self.view.load(url);self.timeout.start(15000)
 
     def ready(self,raw):
         if not raw or not self.selected:return

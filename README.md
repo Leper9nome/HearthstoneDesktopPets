@@ -1,6 +1,6 @@
 # 炉石桌面伙伴 · Hearthstone Desktop Pets
 
-当前版本：**0.2.0**。
+当前版本：**0.2.1**。
 
 将本机炉石客户端中的宠物显示为透明桌面伙伴。提供宠物与皮肤切换、抚摸、动作菜单、自由旋转、滚轮缩放和托盘管理。
 
@@ -43,7 +43,7 @@
 
 重启时会检查所选安装目录。程序根据清单、数据表、相关资源包和依赖文件的时间与大小检测更新，变更后重建对应宠物缓存。客户端格式发生变化时可能需要更新解析代码。游戏目录暂时不可用时，已经导入的缓存仍可播放。
 
-身体、眼睛、透明材质和机械屏幕采用简化表现；完整粒子、玩具、喂食及视线跟随尚未移植。克苏恩对战待机动作会收拢头顶的大眼。
+眼睛使用本地材质中的虹膜、瞳孔形状与颜色参数，并加载本地反光贴图；支持竖瞳、圆瞳与机械矩形眼。机械克苏恩的屏幕读取本地表情控制器与动画曲线，随问候、惊叹、威胁、抚摸等动作切换眼睛和嘴巴图案；动作过渡时保持上一帧表情，并显示扫描线。身体光照和透明材质采用简化表现；完整粒子、玩具、喂食及视线跟随尚未移植。克苏恩对战待机动作会收拢头顶的大眼。
 
 气泡使用本地 `EmoteUI_Atlas` 图集，中文卡名字体使用本地 `GLEI00M_t`（AR LisuGB 隶书）。这些图片和字体只导入用户缓存；缺少对应资源时使用简洁气泡与系统字体。
 
@@ -80,6 +80,8 @@ python tests/test_core.py
 python tests/test_click_through.py
 python tests/test_bubble_menu.py
 python tests/test_ground_shadow.py
+python tests/test_eye_material.py
+python tests/test_texture_wrapping.py
 python tests/test_ui.py --data-dir C:\PetTestData
 python tests/test_ui.py --data-dir C:\PetGameTestData --game "D:\Hearthstone"
 python scripts/audit_release.py
@@ -94,3 +96,5 @@ python scripts/audit_release.py
 自有代码使用 MIT，游戏素材不在此许可内。本项目为个人非官方工具，与暴雪娱乐无隶属或背书关系。用户应在本地使用自己的游戏安装资源。
 
 资源读取复用 [砰砰解析台](https://github.com/AsaMisogi/Heartstone-Tool-Resource-Lab) 的相关代码并保留 MIT 声明。Python、Qt、Three.js、UnityPy、vgmstream 等依赖分别遵循各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+中控面板右上角的摄影机按钮可调整当前宠物的默认视角：右键拖动旋转，Shift＋右键调整倾斜，滚轮缩放。左侧“复原”恢复本次设置前的默认值并继续调整，右侧“保存”保存并退出；Esc 放弃本次调整并退出。默认视角和缩放按宠物保存在本机 preferences.ini，同一宠物的所有皮肤共用。编辑期间暂停自动表情，并暂时解锁视角。

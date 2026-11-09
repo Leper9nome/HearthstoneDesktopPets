@@ -7,7 +7,7 @@ from vendor.pengpeng.storage import Store
 from vendor.pengpeng.common import localized,safe_name
 from export_model import export_model
 
-FORMAT_VERSION=1
+FORMAT_VERSION=3
 
 def progress(message):print(message,flush=True)
 

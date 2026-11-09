@@ -3,7 +3,7 @@ export async function createBubbleMenu({assets={},state,onAction}){
     if(assets.font){try{const face=await new FontFace('PetCardName',`url(${JSON.stringify(assets.font)})`).load();document.fonts.add(face);}catch(error){console.warn('本地卡名字体未加载，使用系统隶书',error);}}
     await Promise.all(['top','middle','bottom','top-hover','middle-hover','bottom-hover'].map(async key=>{if(assets[key]){const im=new Image();im.src=assets[key];try{await im.decode();}catch{delete assets[key];}}}));
     const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
-    let items=null,controls=false,closing=false,transition=0;
+    let items=null,controls=false,closing=false,transition=0,editor=false;
     function clear(){root.getAnimations({subtree:true}).forEach(animation=>animation.cancel());root.replaceChildren();}
     function hide(){
         if(root.hidden||closing)return;
@@ -33,17 +33,18 @@ export async function createBubbleMenu({assets={},state,onAction}){
             }else b.classList.add('fallback');
             const label=document.createElement('span');label.textContent=item.id==='flight'&&state()==='Sequence_Flying_Idle'?'降落':item.label;face.append(label);b.setAttribute('aria-label',label.textContent);
             b.addEventListener('pointerdown',event=>event.stopPropagation());
-            b.addEventListener('click',event=>{event.stopPropagation();if(closing)return;if(item.id==='options'){controls=!controls;render();root.querySelector('[data-action="options"]').focus();}else{hide();onAction(item.id);}});
+            b.addEventListener('click',event=>{event.stopPropagation();if(closing)return;if(item.id==='options'){controls=!controls;render();root.querySelector('[data-action="options"]').focus();}else{if(!editor)hide();onAction(item.id);}});
             root.append(b);
             face.animate([{transform:'scale(.12)',opacity:0},{transform:'scale(1.13)',opacity:1,offset:.55},{transform:'scale(.96)',offset:.78},{transform:'scale(1.025)',offset:.9},{transform:'scale(1)',opacity:1}],{duration:reducedMotion.matches?0:360,easing:'ease-out'});
         }
+        if(editor){button({id:'view-restore',label:'复原'},'left',2);button({id:'view-save',label:'保存'},'right',2);return;}
         rows.forEach((item,i)=>button(item,i<3?'left':'right',i%3));
         button({id:'options',label:controls?'返回':'选项'},'right',3);
     }
-    function show(value){if(!root.hidden&&!closing){hide();return;}transition++;closing=false;root.inert=false;items=value;controls=false;root.hidden=false;render();root.querySelector('button:not(:disabled)')?.focus();}
+    function show(value){if(editor)return;if(!root.hidden&&!closing){hide();return;}transition++;closing=false;root.inert=false;items=value;controls=false;root.hidden=false;render();root.querySelector('button:not(:disabled)')?.focus();}
     function contains(x,y){return !root.hidden&&!closing&&[...root.querySelectorAll('button')].some(b=>{const r=b.getBoundingClientRect();return x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom;});}
-    window.addEventListener('blur',hide);window.addEventListener('resize',hide);
-    document.addEventListener('pointerdown',event=>{if(!root.hidden&&!root.contains(event.target))hide();},true);
-    document.addEventListener('keydown',event=>{if(!root.hidden&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();hide();}},true);
-    return {show,hide,contains};
+    window.addEventListener('blur',()=>{if(!editor)hide();});window.addEventListener('resize',()=>{if(editor)render();else hide();});
+    document.addEventListener('pointerdown',event=>{if(!editor&&!root.hidden&&!root.contains(event.target))hide();},true);
+    document.addEventListener('keydown',event=>{if(!root.hidden&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();if(editor)onAction('view-cancel');else hide();}},true);
+    return {show,hide,contains,edit(){editor=true;transition++;closing=false;root.inert=false;items={emotions:[]};root.hidden=false;render();},finish(){editor=false;hide();}};
 }

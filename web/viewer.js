@@ -1,3 +1,4 @@
+import {eyeMaterial,screenMaterial} from './eye-material.js';
 import * as THREE from './three.module.js';
 import {createIdleActions} from './idle-actions.js';
 import {createBubbleMenu} from './bubble-menu.js';
@@ -46,33 +47,26 @@ nodes[0].position.set(0,0,0);nodes[0].scale.set(1,1,1);
 const geo=new THREE.BufferGeometry();
 for(const [name,values,size] of [['position',data.positions,3],['normal',data.normals.map(v=>v.slice(0,3)),3],['uv',data.uv,2],['skinWeight',data.skinWeights,4]])geo.setAttribute(name,new THREE.Float32BufferAttribute(values.flat(),size));
 geo.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(data.skinIndices.flat(),4));
+if(data.vertexColors)geo.setAttribute('color',new THREE.Float32BufferAttribute(data.vertexColors.flat(),3));
 geo.setIndex(data.indices);data.groups.forEach(g=>geo.addGroup(g.start,g.count,g.material));
 const loader=new THREE.TextureLoader();
-// shortcut: proprietary lighting and eye shaders are approximated from original material colors.
+// Body materials retain their baked color textures.
 async function materialFor(source){
+    if(/^Hero\/Pet\/Eye(?:Square|FX)?$/.test(source.shader))return eyeMaterial(source,loader,assetBase);
+    if(source.shader==='Hero/Pet/PetFlipBook'&&data.vertexColors)return screenMaterial(source,loader,assetBase,nodes);
     const file=source.textures._MainTex||source.textures._BaseMap||source.textures._EyeTex;
     if(file){
         const map=await loader.loadAsync(new URL(file,assetBase).href);map.colorSpace=THREE.SRGBColorSpace;
+        // Unity diffuse UVs can cross tile boundaries, including negative coordinates.
+        if(source.textures._MainTex||source.textures._BaseMap)map.wrapS=map.wrapT=THREE.RepeatWrapping;
         if(source.textures._EyeTex){const tiles=source.floats._Tiles||4,tile=source.floats._CurrentTile||0;map.repeat.set(1/tiles,1/tiles);map.offset.set((tile%tiles)/tiles,1-(Math.floor(tile/tiles)+1)/tiles);}
         const transparent=source.shader?.includes('Transparent')||false;
         // shortcut: use fixed translucency until the game's view-dependent jelly shader is ported.
         const opacity=transparent?(source.floats._FresnelTransparency? .55:source.floats._Opacity??1):1;
         return new THREE.MeshBasicMaterial({map,side:THREE.DoubleSide,transparent,opacity,depthWrite:!transparent,forceSinglePass:true});
     }
-    const colors=source.colors||{},css=(c,fallback='#ffffff')=>c?`rgb(${Math.round(c.r*255)},${Math.round(c.g*255)},${Math.round(c.b*255)})`:fallback;
-    if(!/eye/i.test(source.name))return new THREE.MeshBasicMaterial({color:css(colors._Color),side:THREE.DoubleSide});
-    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=512;const ec=canvas.getContext('2d');
-    if(config.id==='ysera'){
-        const diffuse=data.materials.find(m=>m.textures._MainTex);const texture=await loader.loadAsync(new URL(diffuse.textures._MainTex,assetBase).href);
-        ec.fillStyle='#c7f7ff';ec.fillRect(0,0,512,512);ec.save();ec.beginPath();ec.arc(307,230,110,0,Math.PI*2);ec.clip();ec.drawImage(texture.image,857,756,140,140,197,120,220,220);ec.restore();texture.dispose();
-    }else{
-        ec.fillStyle=css(colors._ScleraColor);ec.fillRect(0,0,512,512);
-        const glow=ec.createRadialGradient(307,230,5,307,230,150);glow.addColorStop(0,css(colors._PupilColor,'#15151a'));glow.addColorStop(.45,css(colors._IrisMainColor,'#e6bd75'));glow.addColorStop(1,css(colors._GlowColor||colors._ScleraColor));
-        ec.fillStyle=glow;ec.beginPath();ec.arc(307,230,150,0,Math.PI*2);ec.fill();
-        if(source.floats._Iris!==0){ec.fillStyle=css(colors._PupilColor,'#15151a');ec.beginPath();ec.ellipse(307,230,22,72,0,0,Math.PI*2);ec.fill();}
-    }
-    const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;
-    return new THREE.MeshBasicMaterial({map,side:THREE.DoubleSide});
+    const color=source.colors?._Color;
+    return new THREE.MeshBasicMaterial({color:color?new THREE.Color(color.r,color.g,color.b):0xffffff,side:THREE.DoubleSide});
 }
 const materials=await Promise.all(data.materials.map(materialFor));
 const pet=new THREE.SkinnedMesh(geo,materials);pet.frustumCulled=false;stage.add(pet);
@@ -84,12 +78,12 @@ const camera=new THREE.OrthographicCamera(-1.25,1.25,1.2,-1.2,.01,100);
 const mixer=new THREE.AnimationMixer(stage),actions={};
 for(const c of data.clips){const tracks=c.tracks.map(t=>new (t.property==='quaternion'?THREE.QuaternionKeyframeTrack:THREE.VectorKeyframeTrack)('bone_'+t.node+'.'+t.property,c.times,t.values));actions[c.name]=mixer.clipAction(new THREE.AnimationClip(c.name,c.duration,tracks));}
 const savedZoom=Number(sessionStorage.getItem('petZoom'));
-let current=null,queue=[],muted=true,voice=null,zoom=Number.isFinite(savedZoom)&&savedZoom>=.65&&savedZoom<=1.5?savedZoom:1,drag=null,native=null,viewLocked=false;
+let current=null,queue=[],muted=true,voice=null,zoom=Number.isFinite(savedZoom)&&savedZoom>=.65&&savedZoom<=1.5?savedZoom:1,drag=null,native=null,viewLocked=false,transitionUntil=0,viewEditing=false,previousLock=false,defaultZoom=1;
 const defaultView=new THREE.Quaternion(),viewOrientation=new THREE.Quaternion();
 const flightCorrection=new THREE.Quaternion();
 const idleTarget=new THREE.Vector3(0,.5,0),flightTarget=new THREE.Vector3(-.4,.9,-.18);
 function updateView(){const flying=window.petState==='Sequence_Flying_Idle',target=flying?flightTarget:idleTarget;camera.quaternion.copy(viewOrientation);if(flying)camera.quaternion.premultiply(flightCorrection);camera.position.set(0,0,4).applyQuaternion(camera.quaternion).add(target);camera.updateMatrixWorld(true);}
-function play(name,loop=false){if(!actions[name])throw Error('Unknown animation: '+name);const next=actions[name],crossfade=current&&current!==next;if(crossfade)current.fadeOut(.18);next.reset().setEffectiveWeight(1).setEffectiveTimeScale(1);next.setLoop(loop?THREE.LoopRepeat:THREE.LoopOnce,loop===true?Infinity:loop||1);next.clampWhenFinished=loop!==true;if(crossfade)next.fadeIn(.18);next.play();current=next;window.petState=name;updateView();}
+function play(name,loop=false){if(!actions[name])throw Error('Unknown animation: '+name);const next=actions[name],crossfade=current&&current!==next;transitionUntil=mixer.time+(crossfade ? .18 : 0);if(crossfade)current.fadeOut(.18);next.reset().setEffectiveWeight(1).setEffectiveTimeScale(1);next.setLoop(loop?THREE.LoopRepeat:THREE.LoopOnce,loop===true?Infinity:loop||1);next.clampWhenFinished=loop!==true;if(crossfade)next.fadeIn(.18);next.play();current=next;window.petState=name;updateView();}
 function sound(name){if(muted||!window.PET_SOUNDS?.[name])return;if(voice)voice.pause();voice=new Audio(window.PET_SOUNDS[name]);voice.volume=.4;voice.play().catch(fail);}
 function command(name){queue=[];if(name==='pet'){queue=[['Sequence_Pet_Loop',2],['Sequence_Pet_Out',false]];play('Sequence_Pet_In');sound('pet');}else{play(name,['Idle_Neutral','Idle_Happy','Sequence_Flying_Idle'].includes(name));sound(name);}}
 mixer.addEventListener('finished',event=>{if(event.action!==current)return;if(queue.length){const [n,l]=queue.shift();play(n,l);}else play('Idle_Neutral',true);});
@@ -122,6 +116,7 @@ return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasi
 const flightView=actions.Sequence_Flying_Idle?calibrateView('Sequence_Flying_Idle'):null;
 defaultView.copy(calibrateView('Idle_Neutral'));
 if(flightView)flightCorrection.copy(flightView).multiply(defaultView.clone().invert());
+const baseView=defaultView.clone();
 viewOrientation.copy(defaultView);updateView();
 function updateProjection(){const w=innerWidth,h=innerHeight,height=(config.viewHeight||2.1)*h/420/zoom;camera.left=-height*w/h/2;camera.right=-camera.left;camera.top=height/2;camera.bottom=-height/2;camera.updateProjectionMatrix();}
 function resize(){renderer.setSize(innerWidth,innerHeight);updateProjection();}
@@ -142,6 +137,7 @@ if(ground){
 if(ground)shadowCanvas.style.filter='blur(6px)';
 let renderFrames=0;
 function renderFrame(){
+    for(const material of materials)material.userData.updateExpression?.(mixer.time<transitionUntil);
     if(groundMaterial){
         scene.overrideMaterial=groundMaterial;
         try{renderer.render(scene,camera);drawGroundShadow();}finally{scene.overrideMaterial=null;}
@@ -154,12 +150,18 @@ function renderFrame(){
 window.petCommand=command;window.petMute=value=>{muted=value;if(muted&&voice)voice.pause();};
 window.petZoom=delta=>{if(viewLocked)return;zoom=THREE.MathUtils.clamp(zoom+delta,.65,1.5);sessionStorage.setItem('petZoom',String(zoom));updateProjection();};
 window.petSetViewLocked=value=>{viewLocked=Boolean(value);};
-window.petResetView=()=>{if(viewLocked)return;viewOrientation.copy(defaultView);zoom=1;sessionStorage.setItem('petZoom',String(zoom));updateView();updateProjection();};
-window.petCheck=()=>{stage.updateMatrixWorld(true);skeleton.update();pet.computeBoundingBox();const box=pet.boundingBox,screenBox=new THREE.Box3(),v=new THREE.Vector3();for(let i=0;i<geo.attributes.position.count;i++)screenBox.expandByPoint(pet.getVertexPosition(i,v).applyMatrix4(pet.matrixWorld).project(camera));return {ready:true,variant:config.id,state:window.petState,bones:skeleton.bones.length,clips:Object.keys(actions),view:{orientation:viewOrientation.toArray(),zoom,locked:viewLocked},viewport:[innerWidth,innerHeight],screenBounds:{min:screenBox.min.toArray(),max:screenBox.max.toArray()},face:{left:point(faceBones[0]).project(camera).toArray(),right:point(faceBones[1]).project(camera).toArray(),forehead:point(faceBones[2]).add(point(faceBones[3])).multiplyScalar(.5).project(camera).toArray(),nose:point(faceBones[4]).add(point(faceBones[5])).multiplyScalar(.5).project(camera).toArray()},renderFrames,ground:ground?{normal:ground.plane.normal.toArray(),constant:ground.plane.constant,contactSamples:ground.contacts.length}:null,bounds:{min:box.min.toArray(),max:box.max.toArray()},errors:window.petErrors};};
+window.petResetView=()=>{if(viewLocked)return;viewOrientation.copy(defaultView);zoom=defaultZoom;sessionStorage.setItem('petZoom',String(zoom));updateView();updateProjection();};
+window.petCheck=()=>{stage.updateMatrixWorld(true);skeleton.update();pet.computeBoundingBox();const box=pet.boundingBox,screenBox=new THREE.Box3(),v=new THREE.Vector3();for(let i=0;i<geo.attributes.position.count;i++)screenBox.expandByPoint(pet.getVertexPosition(i,v).applyMatrix4(pet.matrixWorld).project(camera));return {ready:true,variant:config.id,state:window.petState,bones:skeleton.bones.length,clips:Object.keys(actions),view:{orientation:viewOrientation.toArray(),zoom,locked:viewLocked},viewport:[innerWidth,innerHeight],screenBounds:{min:screenBox.min.toArray(),max:screenBox.max.toArray()},face:{left:point(faceBones[0]).project(camera).toArray(),right:point(faceBones[1]).project(camera).toArray(),forehead:point(faceBones[2]).add(point(faceBones[3])).multiplyScalar(.5).project(camera).toArray(),nose:point(faceBones[4]).add(point(faceBones[5])).multiplyScalar(.5).project(camera).toArray()},renderFrames,screenExpressions:materials.filter(m=>m.userData.updateExpression).map(m=>Object.fromEntries(['EyeLeft','EyeRight','Mouth'].map(key=>[key,m.uniforms[key].value.toArray()]))),ground:ground?{normal:ground.plane.normal.toArray(),constant:ground.plane.constant,contactSamples:ground.contacts.length}:null,bounds:{min:box.min.toArray(),max:box.max.toArray()},errors:window.petErrors};};
 window.petSample=(name,time)=>{mixer.stopAllAction();current=null;play(name,true);current.stopFading().setEffectiveWeight(1);current.time=time;mixer.update(0);renderFrame();return window.petCheck();};
 window.petInspect=()=>{renderFrame();return renderer.domElement.toDataURL();};
 window.petStep=dt=>{renderer.setAnimationLoop(null);mixer.update(dt);return {state:window.petState,root:nodes[boneIndex('rootA_M_jnt')].quaternion.toArray(),weights:Object.fromEntries(Object.entries(actions).map(([name,action])=>[name,action.getEffectiveWeight()]))};};
-const bubbleMenu=await createBubbleMenu({assets:window.PET_MENU_ASSETS||{},state:()=>window.petState,onAction:id=>native?.menuAction(id)});
+const bubbleMenu=await createBubbleMenu({assets:window.PET_MENU_ASSETS||{},state:()=>window.petState,onAction:id=>{if(id==='view-restore')window.petResetView();else if(id==='view-save')native?.cameraAction(JSON.stringify({...window.petViewPreset(),variant:config.id}));else if(id==='view-cancel')native?.cameraAction(JSON.stringify({cancel:true,variant:config.id}));else native?.menuAction(id);}});
+window.petViewPreset=()=>({rotation:baseView.clone().invert().multiply(viewOrientation).normalize().toArray(),zoom});
+window.petApplyDefault=preset=>{if(!preset)return;defaultView.copy(baseView).multiply(new THREE.Quaternion().fromArray(preset.rotation)).normalize();defaultZoom=preset.zoom;window.petResetView();};
+// Apply the local preference before any frame can be painted or declared ready.
+window.petApplyDefault(window.PET_CAMERA_DEFAULT);
+window.petBeginViewSettings=()=>{if(viewEditing)return;viewEditing=true;previousLock=viewLocked;viewLocked=false;command('Idle_Neutral');bubbleMenu.edit();};
+window.petFinishViewSettings=save=>{if(!viewEditing)return;if(save){defaultView.copy(viewOrientation);defaultZoom=zoom;}else window.petResetView();viewEditing=false;viewLocked=previousLock;bubbleMenu.finish();};
 window.petShowMenu=bubbleMenu.show;window.petHideMenu=bubbleMenu.hide;window.petMenuHit=bubbleMenu.contains;
 // Wait for the first painted frame before the native window becomes visible.
 if(window.qt&&window.QWebChannel)new QWebChannel(qt.webChannelTransport,c=>{native=c.objects.desktop;requestAnimationFrame(()=>{renderFrame();requestAnimationFrame(()=>native.ready());});});
@@ -198,14 +200,14 @@ renderer.domElement.addEventListener('pointermove',e=>{
 });
 renderer.domElement.addEventListener('pointerup',()=>{
     const gesture=drag;drag=null;
-    if(!gesture||gesture.moved)return;
+    if(!gesture||gesture.moved||viewEditing)return;
     if(gesture.button===2)native?.menu();else command('pet');
 });
 renderer.domElement.addEventListener('pointercancel',()=>{drag=null;});
 renderer.domElement.addEventListener('lostpointercapture',()=>{drag=null;});
 window.addEventListener('wheel',e=>{e.preventDefault();window.petZoom(e.deltaY>0?-.05:.05);},{passive:false});
-window.addEventListener('keydown',e=>{if(e.key==='Escape')native?.quit();if(e.key===' ')command('Emote_Greetings');});
+window.addEventListener('keydown',e=>{if(viewEditing)return;if(e.key==='Escape')native?.quit();if(e.key===' ')command('Emote_Greetings');});
 const idleActions=createIdleActions(actions,command);
 let last=performance.now(),nextFrame=last;
-renderer.setAnimationLoop(now=>{if(now+.5<nextFrame)return;const dt=Math.min((now-last)/1000,.1);last=now;nextFrame+=1000/60;if(nextFrame<now)nextFrame=now+1000/60;mixer.update(dt);idleActions(dt,window.petState);renderFrame();});
+renderer.setAnimationLoop(now=>{if(now+.5<nextFrame)return;const dt=Math.min((now-last)/1000,.1);last=now;nextFrame+=1000/60;if(nextFrame<now)nextFrame=now+1000/60;mixer.update(dt);if(!viewEditing)idleActions(dt,window.petState);renderFrame();});
 window.petReady=true;

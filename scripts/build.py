@@ -32,7 +32,7 @@ def main():
     command=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--windowed','--name','HearthstoneDesktopPets','--paths',str(ROOT),'--additional-hooks-dir',str(ROOT/'scripts/hooks'),'--distpath',str(output),'--workpath',str(work/'pyinstaller'),'--specpath',str(work),
       '--exclude-module','fmod_toolkit','--exclude-module','pyfmodex','--exclude-module','UnityPy.export.AudioClipConverter','--exclude-module','numpy','--collect-data','UnityPy','--collect-data','archspec',
       '--hidden-import','UnityPy.export.Texture2DConverter','--hidden-import','UnityPy.export.SpriteHelper','--hidden-import','UnityPy.export.MeshExporter']
-    for name in ['web','app.svg','camera.json','decoder','licenses','LICENSE','THIRD_PARTY_NOTICES.md']:
+    for name in ['web','app.svg','camera.svg','camera.json','decoder','licenses','LICENSE','THIRD_PARTY_NOTICES.md']:
         command+=['--add-data',str(ROOT/name)+';'+(name if (ROOT/name).is_dir() else '.')]
     command.append(str(ROOT/'main.py'))
     try:subprocess.run(command,check=True,cwd=ROOT)
